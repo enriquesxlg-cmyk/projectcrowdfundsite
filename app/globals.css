@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+/* Decorative background with geometric patterns */
+body {
+  background-color: #fff;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Left side pattern (more visible using #C93D92 with increased opacity and thickness) */
+body::before {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -18%;
+  width: 34%;
+  height: 220%;
+  z-index: -1;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 12px,
+    rgba(255, 0, 153, 0.18) 12px,
+    rgba(255, 0, 153, 0.18) 28px
+  );
+  transform: rotate(-6deg);
+}
+
+/* Right side pattern (mirrored) */
+body::after {
+  content: '';
+  position: fixed;
+  top: -50%;
+  right: -18%;
+  width: 34%;
+  height: 220%;
+  z-index: -1;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 12px,
+    rgba(201, 61, 146, 0.18) 12px,
+    rgba(201, 61, 146, 0.18) 28px
+  );
+  transform: rotate(6deg);
+}
+
+:root {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background-color: var(--background);
+  /* subtle purple/pink radial accents for depth */
+  background-image:
+    radial-gradient(600px 600px at 0% 0%, rgba(168, 85, 247, 0.10), transparent 45%),
+    radial-gradient(800px 800px at 100% 0%, rgba(236, 72, 153, 0.08), transparent 40%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    /* keep dark solid background for contrast */
+    background-image: none;
+  }
+}

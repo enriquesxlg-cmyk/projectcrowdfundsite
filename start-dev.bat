@@ -1,0 +1,5 @@
+@echo off
+cd /d "%~dp0"
+set NEXT_PUBLIC_SUPABASE_URL=https://lcenyvyvnyotedtbgoda.supabase.co
+set NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxjZW55dnl2bnlvdGVkdGJnb2RhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzNzcwMzgsImV4cCI6MjA3Njk1MzAzOH0.gRXPYFnQeilhHbYVplyMecvLS9RMwwDqPCGpbkTb8Og
+npx.cmd next dev
