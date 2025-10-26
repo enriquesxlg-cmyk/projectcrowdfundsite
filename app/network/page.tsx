@@ -1,321 +1,356 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import Link from 'next/link';
+import { useMemo, useState } from "react";
 
-interface Profile {
-  user_id: string;
-  full_name: string;
-  avatar_url: string | null;
-  bio: string | null;
-  user_type: string;
-  location: string | null;
-  seeking_mentorship: boolean;
-}
+// Network page reimagined as an Events hub: browse hackathons, career fairs, panels, and workshops.
 
-interface Connection {
+const CATEGORIES = [
+  "Hackathon",
+  "Career Fair",
+  "Panel",
+  "Workshop",
+] as const;
+
+type Category = typeof CATEGORIES[number];
+
+type Attendance = "In-Person" | "Virtual" | "Hybrid";
+
+interface EventItem {
   id: string;
-  status: string;
-  requester: Profile;
-  recipient: Profile;
-  message: string | null;
-  created_at: string;
+  title: string;
+  category: Category;
+  date: string; // ISO date (yyyy-mm-dd)
+  startTime?: string; // HH:mm (local to event)
+  endTime?: string; // HH:mm
+  attendance: Attendance;
+  venue?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  url: string; // external registration/details link
+  host?: string;
+  price?: string; // e.g., Free, $25
+  tags?: string[];
+  description?: string;
 }
 
-export default function NetworkPage() {
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [connections, setConnections] = useState<Connection[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<Connection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+// Temporary seed data. In a follow-up, we can store and fetch from Supabase.
+const EVENTS: EventItem[] = [
+  {
+    id: "evt-h1",
+    title: "Nexa x Community Hack Night",
+    category: "Hackathon",
+    date: "2025-11-08",
+    startTime: "10:00",
+    endTime: "18:00",
+    attendance: "In-Person",
+    venue: "Innovation Hub",
+    city: "Austin",
+    state: "TX",
+    country: "USA",
+    url: "https://lu.ma/",
+    host: "NexaFund + Local Devs",
+    price: "Free",
+    tags: ["AI", "Web", "Open Source"],
+    description:
+      "A friendly day hack to build scrappy prototypes and meet collaborators.",
+  },
+  {
+    id: "evt-cf1",
+    title: "Tech Career Fair – Winter Edition",
+    category: "Career Fair",
+    date: "2025-11-15",
+    startTime: "11:00",
+    endTime: "16:00",
+    attendance: "Hybrid",
+    venue: "Convention Center Hall B",
+    city: "Seattle",
+    state: "WA",
+    country: "USA",
+    url: "https://eventbrite.com/",
+    host: "TechBridge",
+    price: "Free w/ RSVP",
+    tags: ["Internships", "Early Career"],
+  },
+  {
+    id: "evt-p1",
+    title: "Designing Your First Startup Panel",
+    category: "Panel",
+    date: "2025-11-05",
+    startTime: "18:30",
+    endTime: "20:00",
+    attendance: "Virtual",
+    url: "https://zoom.us/",
+    host: "FounderTalks",
+    price: "Free",
+    tags: ["Founders", "UX", "Product"],
+  },
+  {
+    id: "evt-w1",
+    title: "Practical AI Workshop: From Idea to MVP",
+    category: "Workshop",
+    date: "2025-11-22",
+    startTime: "09:30",
+    endTime: "12:30",
+    attendance: "Virtual",
+    url: "https://lu.ma/",
+    host: "MVP School",
+    price: "$25",
+    tags: ["AI", "Prototyping"],
+  },
+  {
+    id: "evt-h2",
+    title: "Campus Mini-Hack",
+    category: "Hackathon",
+    date: "2025-11-29",
+    startTime: "10:00",
+    endTime: "17:00",
+    attendance: "In-Person",
+    venue: "Student Union",
+    city: "Ann Arbor",
+    state: "MI",
+    country: "USA",
+    url: "https://example.org/",
+    host: "Hackers@U",
+    price: "Free",
+  },
+  {
+    id: "evt-cf2",
+    title: "Diversity in Tech Career Expo",
+    category: "Career Fair",
+    date: "2025-12-03",
+    startTime: "12:00",
+    endTime: "17:00",
+    attendance: "Virtual",
+    url: "https://hopin.com/",
+    host: "EqualTech",
+    price: "Free",
+    tags: ["Remote", "Diversity"],
+  },
+];
 
-  useEffect(() => {
-    async function init() {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          setError('Please sign in to access networking features');
-          setLoading(false);
-          return;
-        }
+function toDate(d: string): Date {
+  // Ensure we interpret as local date at midnight for consistent compare
+  const [y, m, day] = d.split("-").map((n) => Number(n));
+  return new Date(y, m - 1, day);
+}
 
-        setCurrentUser(user);
+function formatDate(d: string): string {
+  return toDate(d).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
-        // Fetch user's connections
-        const connectionsRes = await fetch(`/api/connections?user_id=${user.id}`);
-        const connectionsData = await connectionsRes.json();
-        
-        if (connectionsRes.ok) {
-          const allConnections = connectionsData.connections || [];
-          setConnections(allConnections.filter((c: Connection) => c.status === 'accepted'));
-          setPendingRequests(allConnections.filter(
-            (c: Connection) => c.status === 'pending' && c.recipient.user_id === user.id
-          ));
-        }
+export default function NetworkEventsPage() {
+  const [query, setQuery] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState<Set<Category>>(new Set());
+  const [attendance, setAttendance] = useState<Attendance | "All">("All");
+  const [when, setWhen] = useState<"All" | "This Week" | "This Month">("All");
 
-        // Fetch suggested profiles (seeking mentorship or companies)
-        const { data: profilesData } = await supabase
-          .from('profiles')
-          .select('*')
-          .neq('user_id', user.id)
-          .or('seeking_mentorship.eq.true,user_type.eq.company')
-          .limit(20);
+  const today = new Date();
 
-        if (profilesData) {
-          setProfiles(profilesData);
-        }
-      } catch (err) {
-        setError('Failed to load network data');
-        console.error(err);
-      } finally {
-        setLoading(false);
+  const filtered = useMemo(() => {
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - ((today.getDay() + 6) % 7)); // Monday
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+    return EVENTS.filter((e) => {
+      const date = toDate(e.date);
+
+      // Only upcoming or today
+      if (date < new Date(today.getFullYear(), today.getMonth(), today.getDate())) {
+        return false;
       }
-    }
 
-    init();
-  }, []);
+      if (when === "This Week" && (date < startOfWeek || date > endOfWeek)) return false;
+      if (when === "This Month" && (date < startOfMonth || date > endOfMonth)) return false;
 
-  async function sendConnectionRequest(recipientId: string) {
-    if (!currentUser) return;
+      if (attendance !== "All" && e.attendance !== attendance) return false;
 
-    try {
-      const res = await fetch('/api/connections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requester_id: currentUser.id,
-          recipient_id: recipientId,
-          message: "I'd like to connect with you on NexaFund",
-        }),
-      });
+      if (selectedCategories.size > 0 && !selectedCategories.has(e.category)) return false;
 
-      if (res.ok) {
-        alert('Connection request sent!');
-        // Remove from suggested profiles
-        setProfiles(profiles.filter(p => p.user_id !== recipientId));
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Failed to send connection request');
+      const q = query.trim().toLowerCase();
+      if (q.length) {
+        const hay = [
+          e.title,
+          e.host ?? "",
+          e.venue ?? "",
+          e.city ?? "",
+          e.state ?? "",
+          e.country ?? "",
+          ...(e.tags ?? []),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
       }
-    } catch (err) {
-      alert('Failed to send connection request');
-    }
-  }
 
-  async function respondToRequest(connectionId: string, status: 'accepted' | 'rejected') {
-    if (!currentUser) return;
+      return true;
+    }).sort((a, b) => toDate(a.date).getTime() - toDate(b.date).getTime());
+  }, [today, query, attendance, selectedCategories, when]);
 
-    try {
-      const res = await fetch('/api/connections', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          connection_id: connectionId,
-          status,
-          user_id: currentUser.id,
-        }),
-      });
-
-      if (res.ok) {
-        setPendingRequests(pendingRequests.filter(r => r.id !== connectionId));
-        if (status === 'accepted') {
-          // Reload connections
-          const connectionsRes = await fetch(`/api/connections?user_id=${currentUser.id}&status=accepted`);
-          const connectionsData = await connectionsRes.json();
-          if (connectionsRes.ok) {
-            setConnections(connectionsData.connections || []);
-          }
-        }
-      } else {
-        alert('Failed to update connection');
-      }
-    } catch (err) {
-      alert('Failed to update connection');
-    }
-  }
-
-  if (loading) {
-    return (
-      <main className="container mx-auto px-4 py-12">
-        <div className="flex items-center justify-center py-20">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-purple-600 border-t-transparent" />
-        </div>
-      </main>
-    );
-  }
-
-  if (error) {
-    return (
-      <main className="container mx-auto px-4 py-12">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-600">
-          {error}
-        </div>
-      </main>
-    );
+  function toggleCategory(cat: Category) {
+    setSelectedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
   }
 
   return (
     <main className="container mx-auto px-4 py-12">
-      <h1 className="text-4xl font-bold mb-8">Network</h1>
+      <h1 className="mb-8 text-4xl font-bold">Networking Events</h1>
 
-      {/* Pending Requests */}
-      {pendingRequests.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold mb-4">Connection Requests</h2>
-          <div className="space-y-3">
-            {pendingRequests.map((request) => (
-              <div
-                key={request.id}
-                className="flex items-center justify-between gap-4 rounded-lg border border-purple-200 bg-purple-50/30 p-4"
-              >
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  {request.requester.avatar_url ? (
-                    <img
-                      src={request.requester.avatar_url}
-                      alt={request.requester.full_name}
-                      className="h-12 w-12 rounded-full object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-purple-400 to-purple-600 text-white font-semibold flex-shrink-0">
-                      {request.requester.full_name[0].toUpperCase()}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      href={`/profile/${request.requester.user_id}`}
-                      className="font-semibold hover:text-purple-600 block truncate"
-                    >
-                      {request.requester.full_name}
-                    </Link>
-                    <p className="text-sm text-gray-600 truncate">{request.message}</p>
-                  </div>
-                </div>
-                <div className="flex gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => respondToRequest(request.id, 'accepted')}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
-                  >
-                    Accept
-                  </button>
-                  <button
-                    onClick={() => respondToRequest(request.id, 'rejected')}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm"
-                  >
-                    Decline
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Controls */}
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="flex flex-1 flex-col gap-3">
+          <label className="text-sm font-medium" htmlFor="search">
+            Search (title, host, city, tags)
+          </label>
+          <input
+            id="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Try: Austin, AI, Career Fair..."
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+          />
         </div>
-      )}
-
-      {/* My Connections */}
-      {connections.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold mb-4">My Connections ({connections.length})</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {connections.map((connection) => {
-              const otherUser = connection.requester.user_id === currentUser?.id 
-                ? connection.recipient 
-                : connection.requester;
-              
-              return (
-                <Link
-                  key={connection.id}
-                  href={`/profile/${otherUser.user_id}`}
-                  className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 hover:border-purple-300 hover:shadow-md transition-all"
-                >
-                  {otherUser.avatar_url ? (
-                    <img
-                      src={otherUser.avatar_url}
-                      alt={otherUser.full_name}
-                      className="h-14 w-14 rounded-full object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-purple-400 to-purple-600 text-white font-semibold flex-shrink-0">
-                      {otherUser.full_name[0].toUpperCase()}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold truncate">{otherUser.full_name}</div>
-                    {otherUser.bio && (
-                      <p className="text-sm text-gray-600 line-clamp-2">{otherUser.bio}</p>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Suggested Connections */}
-      <div>
-        <h2 className="text-2xl font-bold mb-4">People You May Know</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {profiles.map((profile) => (
-            <div
-              key={profile.user_id}
-              className="rounded-lg border border-gray-200 bg-white p-6"
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium">When</label>
+            <select
+              value={when}
+              onChange={(e) => setWhen(e.target.value as typeof when)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
             >
-              <div className="flex flex-col items-center text-center">
-                {profile.avatar_url ? (
-                  <img
-                    src={profile.avatar_url}
-                    alt={profile.full_name}
-                    className="h-20 w-20 rounded-full object-cover mb-4"
-                  />
-                ) : (
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-purple-400 to-purple-600 text-white text-2xl font-bold mb-4">
-                    {profile.full_name[0].toUpperCase()}
-                  </div>
-                )}
-                
-                <Link
-                  href={`/profile/${profile.user_id}`}
-                  className="font-bold text-lg hover:text-purple-600 mb-1"
-                >
-                  {profile.full_name}
-                </Link>
-
-                {profile.seeking_mentorship && (
-                  <span className="inline-block text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full mb-2">
-                    Seeking Mentorship
-                  </span>
-                )}
-
-                {profile.user_type === 'company' && (
-                  <span className="inline-block text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full mb-2">
-                    Company
-                  </span>
-                )}
-
-                {profile.location && (
-                  <p className="text-sm text-gray-500 mb-2">📍 {profile.location}</p>
-                )}
-
-                {profile.bio && (
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-2">{profile.bio}</p>
-                )}
-
-                <button
-                  onClick={() => sendConnectionRequest(profile.user_id)}
-                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                >
-                  Connect
-                </button>
-              </div>
-            </div>
-          ))}
+              <option>All</option>
+              <option>This Week</option>
+              <option>This Month</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium">Attendance</label>
+            <select
+              value={attendance}
+              onChange={(e) => setAttendance(e.target.value as Attendance | "All")}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 focus:border-purple-500 focus:ring-2 focus:ring-purple-200"
+            >
+              <option>All</option>
+              <option>In-Person</option>
+              <option>Virtual</option>
+              <option>Hybrid</option>
+            </select>
+          </div>
         </div>
+      </div>
 
-        {profiles.length === 0 && (
-          <p className="text-center text-gray-600 py-12">No suggestions at this time</p>
+      {/* Category chips */}
+      <div className="mb-6 flex flex-wrap gap-2">
+        {CATEGORIES.map((cat) => {
+          const active = selectedCategories.has(cat);
+          return (
+            <button
+              key={cat}
+              onClick={() => toggleCategory(cat)}
+              aria-pressed={active}
+              className={
+                "rounded-full border px-3 py-1 text-sm transition-colors " +
+                (active
+                  ? "border-purple-600 bg-purple-600 text-white hover:bg-purple-700"
+                  : "border-gray-300 bg-white text-gray-700 hover:border-purple-300 hover:text-purple-700")
+              }
+            >
+              {cat}
+            </button>
+          );
+        })}
+        {selectedCategories.size > 0 && (
+          <button
+            onClick={() => setSelectedCategories(new Set())}
+            className="rounded-full border border-gray-300 bg-white px-3 py-1 text-sm text-gray-700 hover:border-red-300 hover:text-red-600"
+          >
+            Clear
+          </button>
         )}
       </div>
+
+      {/* Results */}
+      {filtered.length === 0 ? (
+        <p className="py-16 text-center text-gray-600">No events match your filters.</p>
+      ) : (
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((e) => {
+            const location =
+              e.attendance === "Virtual"
+                ? "Online"
+                : [e.venue, e.city, e.state, e.country].filter(Boolean).join(", ");
+            return (
+              <article
+                key={e.id}
+                className="group rounded-lg border border-gray-200 bg-white p-5 transition-all hover:border-purple-300 hover:shadow-md"
+              >
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                    {e.category}
+                  </span>
+                  <span className="text-sm text-gray-600">{formatDate(e.date)}</span>
+                </div>
+                <h3 className="mb-1 line-clamp-2 text-lg font-semibold text-gray-900">
+                  {e.title}
+                </h3>
+                {e.host && (
+                  <p className="text-sm text-gray-600">Hosted by {e.host}</p>
+                )}
+                <p className="mt-2 text-sm text-gray-700">
+                  {location}
+                  {e.startTime && (
+                    <>
+                      {" "}• {e.startTime}
+                      {e.endTime ? `–${e.endTime}` : ""}
+                    </>
+                  )}
+                </p>
+                {e.tags && e.tags.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1">
+                    {e.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-700"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="text-sm text-gray-600">{e.attendance}{e.price ? ` • ${e.price}` : ""}</span>
+                  <a
+                    href={e.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-purple-700"
+                  >
+                    Details
+                  </a>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      {/* Note */}
+      <p className="mt-10 text-center text-xs text-gray-500">
+        Don’t see an event you love? In a future update you’ll be able to submit your own and we’ll feature it here.
+      </p>
     </main>
   );
 }

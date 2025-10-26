@@ -18,21 +18,18 @@ export async function GET(request: Request) {
 
     const supabase = await getAdminClient();
 
-    let query = supabase
-      .from('company_profiles')
-      .select(`
-        *,
-        profiles!company_profiles_user_id_fkey (
-          user_id,
-          full_name,
-          avatar_url
-        )
-      `);
+    let query = null;
 
     if (company_id) {
-      query = query.eq('id', company_id).single();
+      query = supabase
+        .from('company_profiles')
+        .select('*')
+        .eq('id', company_id);
     } else if (user_id) {
-      query = query.eq('user_id', user_id).single();
+      query = supabase
+        .from('company_profiles')
+        .select('*')
+        .eq('user_id', user_id);
     } else {
       // Return all companies in directory
       query = query.eq('show_in_directory', true);

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+type Params = Promise<{ slug:string}>
+
 function getSampleBySlug(slug: string) {
   const samples: Record<string, any> = {
     'sample-open-source-laptop': {
@@ -99,9 +101,9 @@ async function getAdminClient() {
   return createClient(url, key);
 }
 
-export async function GET(_request: Request, context: { params: { slug: string } }) {
+export async function GET(_request: Request, context: { params: Params}) {
   try {
-    const slug = context.params.slug;
+    const { slug } = await context.params
     if (slug.startsWith('sample-')) {
       const sample = getSampleBySlug(slug);
       if (!sample) return NextResponse.json({ error: 'Not found' }, { status: 404 });
